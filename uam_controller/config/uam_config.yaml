@@ -1,0 +1,63 @@
+# 该文件定义了无人机的全局物理属性。
+# 控制器节点会尝试从这里加载参数，以覆盖其内部的默认值。
+# 这使得更换不同物理模型的无人机时，只需修改此文件即可。
+
+# --- 全局物理参数 ---
+max_thrust: 50.0  # (N) 整个无人机能产生的最大推力
+
+mass_quad_body: 2.458 # (kg) 无人机机身（不含旋翼）的质量
+# (kg*m^2) 机身绕其重心的转动惯量张量。对于对称的X型无人机，xx和yy通常相等。
+inertia_quad_body: {xx: 0.01860, xy: 0.0, xz: 0.0, yy: 0.01860, yz: 0.0, zz: 0.03215}
+# (m) 机身的几何尺寸，主要用于仿真或可视化
+config_quad_body: {body_width: 0.3, body_height: 0.16, arm_length: 0.225}
+
+# --- 单个旋翼/电机参数 ---
+mass_rotor: 0.005              # (kg) 单个旋翼（桨叶+电机转子）的质量
+radius_rotor: 0.1              # (m) 桨叶半径
+motor_constant: 6.450e-6       # 电机拉力常数 Ct : F = ω^2 * Ct (F单位N, ω单位rad/s)
+moment_constant: 1.056e-7      # 电机力矩常数 Cm : τ = ω^2 * Cm (τ单位N*m)
+time_constant_up: 0.0125       # (s) 电机从静止加速到63%目标转速的时间常数
+time_constant_down: 0.025      # (s) 电机从高速减速的时间常数 (通常比加速慢)
+max_rot_velocity: 1434.7       # (rad/s) 电机最大角速度, 约等于 13700 RPM
+
+# --- 旋翼布局配置 ---
+# 这里详细定义了每个旋翼的物理位置和属性。
+# 键 '0', '1', '2', '3' 通常对应仿真或固件中的电机编号。
+# 在本控制器中，会根据角度自动映射到 前左/前右/后左/后右。
+rotor_configuration:
+  # 电机 0:
+  '0': {
+    angle: 0.78539,             # (rad) 力臂与机身x轴正方向的夹角 (pi/4 = 45度, 位于第一象限, 前右)
+    arm_length: 0.225,          # (m) 力臂长度
+    rotor_force_constant: 6.450e-6, # 该电机的独立拉力系数 (可覆盖全局值)
+    rotor_moment_constant: 1.056e-7, # 该电机的独立力矩系数
+    direction: -1.0             # 旋转方向: -1.0 为顺时针(CW), 1.0 为逆时针(CCW)
+  }
+  # 电机 1:
+  '1': {
+    angle: -0.78539,            # (rad) -pi/4 = -45度 (第四象限, 后右)
+    arm_length: 0.225,
+    rotor_force_constant: 6.450e-6,
+    rotor_moment_constant: 1.056e-7,
+    direction: 1.0              # CCW
+  }
+  # 电机 2:
+  '2': {
+    angle: 2.35619,             # (rad) 3*pi/4 = 135度 (第二象限, 前左)
+    arm_length: 0.225,
+    rotor_force_constant: 6.450e-6,
+    rotor_moment_constant: 1.056e-7,
+    direction: 1.0              # CCW
+  }
+  # 电机 3:
+  '3': {
+    angle: -2.35619,            # (rad) -3*pi/4 = -135度 (第三象限, 后左)
+    arm_length: 0.225,
+    rotor_force_constant: 6.450e-6,
+    rotor_moment_constant: 1.056e-7,
+    direction: -1.0             # CW
+  }
+# 标准X型四旋翼布局:
+# 前右(CW), 后左(CW)
+# 前左(CCW), 后右(CCW)
+# 这样的布局可以抵消反扭矩，实现偏航控制。

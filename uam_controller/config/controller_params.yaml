@@ -1,0 +1,69 @@
+# 该文件为 uam_controller_node 和 setpoint_publisher 节点提供参数配置
+# 这些参数可以在不重新编译代码的情况下进行调整，方便调试和优化
+
+uam_controller_node:
+  # --- ROS 接口相关 ---
+  frame_id: "world"                             # 全局参考坐标系
+  odom_topic: "/quad/odometry"                  # 订阅的里程计话题名称
+  disturbance_topic: "/quad/disturbance_estimate" # 订阅的扰动估计话题名称
+  motor_cmd_topic: "/quad/motor_cmd"            # 发布的电机指令话题名称
+  setpoint_topic: "/quad/position_setpoint"     # 订阅的目标点话题名称
+
+  # --- 控制器基本参数 ---
+  control_rate: 200.0           # 控制循环的频率 (Hz)
+  mass: 2.458                   # 无人机总质量 (kg)
+  gravity: 9.8066               # 重力加速度 (m/s^2)
+  max_thrust: 50.0              # 最大总推力 (N)
+  hover_throttle: 0.5           # 悬停时的大致油门值 (0-1)，用于某些前馈逻辑
+  arm_length: 0.225             # 力臂长度 (m)，从中心到单个电机的距离
+  motor_constant: 6.450e-6      # 电机拉力系数 (F = k * w^2)
+  moment_constant: 1.056e-7     # 电机力矩系数 (M = b * w^2)
+  inertia_xx: 0.01860           # 绕机体 X 轴的转动惯量 (kg*m^2)
+  inertia_yy: 0.01860           # 绕机体 Y 轴的转动惯量
+  inertia_zz: 0.03215           # 绕机体 Z 轴的转动惯量
+  motor_force_scale: 12.5       # 推力到油门的转换系数 (throttle = Force / scale)
+  
+  # --- 滤波器与限制 ---
+  velocity_filter_alpha: 0.35   # 速度低通滤波器的系数 (越小滤波效果越强，但延迟越大)
+  integral_limit: 0.2           # PID 积分项的抗饱和限制值
+  feedforward_timeout: 0.2      # 扰动前馈的超时时间 (s)，超过此时间则认为扰动估计无效
+  motor_min_cmd: 0.0            # 最小电机输出 (0-1)
+  motor_max_cmd: 0.95           # 最大电机输出 (0-1)
+  max_tilt_deg: 35.0            # 最大允许的倾斜角度 (度)，限制水平机动性
+  max_ascent_rate: 2.0          # 最大上升速度 (m/s)
+  max_descent_rate: 1.0         # 最大下降速度 (m/s)
+  use_yaw_rate_stabilizer: true # 是否使用偏航角速度来稳定偏航 (否则只用偏航角)
+
+  # --- 位置控制器增益 (外环) ---
+  position_kp_xy: 1.2           # 水平位置 P 增益 (位置误差 -> 期望速度)
+  position_kp_z: 6.0            # 垂直位置 P 增益
+  velocity_kd_xy: 1.5           # 水平速度 D 增益 (速度误差 -> 期望加速度)
+  velocity_kd_z: 3.0            # 垂直速度 D 增益
+
+  # --- 姿态控制器增益 (内环) ---
+  attitude_kp_roll: 6.0         # 滚转角 P 增益
+  attitude_kp_pitch: 6.0        # 俯仰角 P 增益
+  attitude_kp_yaw: 6.0          # 偏航角 P 增益
+  
+  attitude_ki_roll: 0.0         # 滚转角 I 增益 (用于消除稳态误差)
+  attitude_ki_pitch: 0.0        # 俯仰角 I 增益
+  attitude_ki_yaw: 0.0          # 偏航角 I 增益
+  
+  attitude_kd_roll: 1.2         # 滚转角 D 增益 (提供角速度阻尼)
+  attitude_kd_pitch: 1.2        # 俯仰角 D 增益
+  attitude_kd_yaw: 1.2          # 偏航角 D 增益
+
+setpoint_publisher:
+  # --- 轨迹发布器参数 ---
+  publish_rate: 20.0            # 目标点的发布频率 (Hz)
+  start_delay: 1.0              # 节点启动后延迟多久开始发布目标点 (s)
+  trajectory: "hover"           # 轨迹类型: "hover", "circle", "line"
+  hover_point: [0.0, 0.0, 1.0]  # 悬停点或轨迹中心点的 [x, y, z] 坐标
+  path_frame_id: "world"        # 目标点所在的坐标系
+  setpoint_topic: "/quad/position_setpoint" # 发布目标点的话题名称
+
+  # --- 不同轨迹的特定参数 ---
+  circle_radius: 1.0            # 圆形轨迹的半径 (m)
+  circle_period: 20.0           # 绕一圈需要的时间 (s)
+  line_speed: 0.5               # 直线往复运动的速度 (m/s)
+  line_length: 2.0              # 直线往复运动的总长度 (m)
