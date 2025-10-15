@@ -1,15 +1,19 @@
 <mujoco model="quad scene">
+  <!-- 引入基础飞行器模型（几何、关节、执行器定义在 quad.xml） -->
   <include file="quad.xml"/>
 
+  <!-- 统计设置影响可视化缩放、重心等调试参数 -->
   <statistic center="0 0 0.1" extent="0.2" meansize=".05"/>
 
   <visual>
+    <!-- 设置全局光照和背景雾效，加强场景可视化效果 -->
     <headlight diffuse="0.6 0.6 0.6" ambient="0.3 0.3 0.3" specular="0 0 0"/>
     <rgba haze="0.15 0.25 0.35 1"/>
     <global azimuth="-20" elevation="-20" ellipsoidinertia="true"/>
   </visual>
 
   <asset>
+    <!-- 天空盒与地面纹理，提供背景与棋盘地面材质 -->
     <texture type="skybox" builtin="gradient" rgb1="0.3 0.5 0.7" rgb2="0 0 0" width="512" height="3072"/>
     <texture type="2d" name="groundplane" builtin="checker" mark="edge" rgb1="0.2 0.3 0.4" rgb2="0.1 0.2 0.3"
       markrgb="0.8 0.8 0.8" width="300" height="300"/>
@@ -17,9 +21,12 @@
   </asset>
 
   <worldbody>
+    <!-- 俯视相机便于观察飞行器运动 -->
     <camera name="world_camera" pos="0.560 -0.687 0.744" xyaxes="0.872 0.489 -0.000 -0.260 0.465 0.846"/>
     <!-- <camera name="world_camera" pos="-0.37 -0.78 0.49" xyaxes="0.78 -0.63 0 0.27 0.33 0.9"/> -->
+    <!-- 主光源，自上而下照亮场景 -->
     <light pos="0 0 1.5" dir="0 0 -1" directional="true"/>
+    <!-- 场景中唯一的地面平面，与 quad.xml 中的模型没有重叠 -->
     <geom name="floor" size="0 0 0.05" type="plane" material="groundplane"/>
   </worldbody>
 </mujoco>
