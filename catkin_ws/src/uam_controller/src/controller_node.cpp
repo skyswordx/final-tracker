@@ -316,7 +316,12 @@ void ControllerNode::controlLoop(const ros::TimerEvent &event)
 Eigen::Vector3d ControllerNode::computePositionControl(double dt, double &desired_yaw)
 {
   // 外环 P 控制：位置误差 -> 期望速度
-  Eigen::Vector3d position_error = setpoint_.valid ? (setpoint_.position - state_.position) : Eigen::Vector3d::Zero();
+  Eigen::Vector3d position_error;
+  if (setpoint_.valid) {
+    position_error = setpoint_.position - state_.position;
+  } else {
+    position_error = Eigen::Vector3d::Zero();
+  }
   Eigen::Vector2d vel_cmd_xy = pos_gains_.kp_xy * position_error.head<2>();
   double vel_cmd_z = pos_gains_.kp_z * position_error.z();
   vel_cmd_z = clamp(vel_cmd_z, -max_descent_rate_, max_ascent_rate_); // 限制垂直速度

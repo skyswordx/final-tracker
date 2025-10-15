@@ -53,3 +53,29 @@ dkms.conf
 
 # debug information files
 *.dwo
+
+# ROS/Catkin build artifacts
+catkin_ws/build/
+catkin_ws/devel/
+catkin_ws/install/
+catkin_ws/.catkin_workspace
+catkin_ws/src/CMakeLists.txt
+
+# ROS generated files
+*.pyc
+*.pyo
+__pycache__/
+*.bag
+*.orig
+*.log
+*.class
+
+# Dynamic reconfigure generated files
+cfg/cpp/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
