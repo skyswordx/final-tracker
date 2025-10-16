@@ -7,7 +7,6 @@
     <rosparam command="load" file="$(find target_ekf)/config/camera.yaml" />
     <param name="pitch_thr" value="37"/>
     <remap from="~yolo" to="$(arg yolo_topic)"/>
-    <remap from="~odom" to="$(arg odom_topic)"/>
-    <remap from="~target_odom" to="$(arg target_topic)"/>
+    <remap from="target_ekf_node/odom" to="$(arg target_topic)"/>
   </node>
 </launch>
