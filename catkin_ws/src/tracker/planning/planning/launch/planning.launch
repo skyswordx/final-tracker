@@ -3,7 +3,8 @@
   <arg name="rhosVisibility_"/>
   <arg name="rhoTracking_"/>
   <arg name="target_name_"/>
-  <arg name="odom_topic_" default="/iris_0/mavros/vision_odom/odom"/>
+  <arg name="odom_topic_" default="/diy_odom"/>
+  <arg name="position_cmd_topic" default="/position_cmd"/>
 
   <!-- <node pkg="nodelet" type="nodelet" name="plan_manage" args="manager" output="screen">
     <param name="num_worker_threads" value="16"/>
@@ -43,7 +44,7 @@
 
   </node>
   <node pkg="planning" name="traj_server" type="traj_server" output="screen">
-    <remap from="~position_cmd" to="/position_cmd"/>
+    <remap from="~position_cmd" to="$(arg position_cmd_topic)"/>
     <remap from="~trajectory" to="trajectory"/>
     <remap from="~heartbeat" to="heartbeat"/>
     <param name="time_forward" value="1.0" type="double"/>

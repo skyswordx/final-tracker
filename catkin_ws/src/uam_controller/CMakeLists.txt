@@ -7,6 +7,7 @@ find_package(catkin REQUIRED COMPONENTS
   dynamic_reconfigure
   geometry_msgs
   nav_msgs
+  quadrotor_msgs
   roscpp
   std_msgs
   tf2
@@ -22,7 +23,7 @@ generate_dynamic_reconfigure_options(
 
 catkin_package(
   INCLUDE_DIRS include
-  CATKIN_DEPENDS dynamic_reconfigure geometry_msgs nav_msgs roscpp std_msgs tf2 tf2_geometry_msgs tf2_ros
+  CATKIN_DEPENDS dynamic_reconfigure geometry_msgs nav_msgs quadrotor_msgs roscpp std_msgs tf2 tf2_geometry_msgs tf2_ros
 )
 
 include_directories(
@@ -41,6 +42,7 @@ target_link_libraries(setpoint_publisher ${catkin_LIBRARIES})
 
 catkin_install_python(PROGRAMS
   scripts/control_monitor.py
+  scripts/position_command_to_pose.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 

@@ -1,15 +1,17 @@
 <launch>
   <!-- 定义参数，用于接收上一级 launch 文件传入的值 -->
-  <arg name="odom_topic" default="/iris_0/mavros/vision_odom/odom"/>
-  <arg name="depth_topic" default="/iris_0/modified_depth_image"/>
+  <arg name="odom_topic" default="/diy_odom"/>
+  <arg name="depth_topic" default="/diy_img/depth/image_raw"/>
   <arg name="target_topic" default="/target_ekf_odom"/>
+  <arg name="use_rviz" default="true"/>
 
   <node pkg="nodelet" type="nodelet" name="manager" args="manager" output="screen">
     <param name="num_worker_threads" value="16"/>
   </node>
 
-  <node name="rviz" pkg="rviz" type="rviz" args="-d $(find mapping)/config/rviz_sim.rviz">
-  </node>
+  <group if="$(arg use_rviz)">
+    <node name="rviz" pkg="rviz" type="rviz" args="-d $(find mapping)/config/rviz_sim.rviz"/>
+  </group>
   <!-- <include file="$(find uav_simulator)/launch/uav_simulator.launch"/> -->
 
   <node pkg="nodelet" type="nodelet" name="mapping" args="load mapping/Nodelet manager" output="screen">

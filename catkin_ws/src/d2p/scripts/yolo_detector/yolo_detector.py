@@ -17,7 +17,7 @@ target_classes = ["person"]
 
 
 path_curr = os.path.dirname(__file__)
-img_topic = "/iris_0/realsense/depth_camera/color/image_raw"
+DEFAULT_IMAGE_TOPIC = "/diy_img/rgb/image_raw"
 device = "cpu"
 weight = "weights/weight_AP05:0.253207_280-epoch.pth"
 class_names = "config/coco.names"
@@ -30,6 +30,8 @@ class yolo_detector:
         self.img_received = False
         self.img_detected = False
 
+        self.image_topic = rospy.get_param("~image_topic", DEFAULT_IMAGE_TOPIC)
+
 
         # init and load
         self.model = Detector(80, True).to(device)
@@ -38,7 +40,7 @@ class yolo_detector:
 
         # subscriber
         self.br = CvBridge()
-        self.img_sub = rospy.Subscriber(img_topic, Image, self.image_callback)
+        self.img_sub = rospy.Subscriber(self.image_topic, Image, self.image_callback)
 
         # publisher
         self.img_pub = rospy.Publisher("yolo_detector/detected_image", Image, queue_size=10)

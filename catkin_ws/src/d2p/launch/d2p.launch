@@ -1,4 +1,7 @@
 <launch>
+    <arg name="image_topic" default="/diy_img/rgb/image_raw"/>
+    <arg name="use_rviz" default="true"/>
+
     <!-- 启动 d2p_node -->
     <node name="d2p_node" pkg="d2p" type="d2p_node" output="screen">
         <!-- 你可以在这里添加任何必要的参数 -->
@@ -6,6 +9,9 @@
         <!-- <param name="param_name" value="param_value" /> -->
     </node>
     <node name="detect_node" pkg="d2p" type="yolo_detector_node.py" output="screen">
+        <param name="image_topic" value="$(arg image_topic)"/>
     </node>
-    <node name="rviz" pkg="rviz" type="rviz" args="-d $(find d2p)/rviz/detector.rviz"/>
+    <group if="$(arg use_rviz)">
+        <node name="rviz" pkg="rviz" type="rviz" args="-d $(find d2p)/rviz/detector.rviz"/>
+    </group>
 </launch>

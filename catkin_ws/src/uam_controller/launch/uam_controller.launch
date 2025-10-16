@@ -1,5 +1,11 @@
 <launch>
   <arg name="use_monitor" default="true" />
+  <arg name="use_setpoint_publisher" default="true" />
+  <arg name="odom_topic" default="/diy_odom" />
+  <arg name="setpoint_topic" default="/quad/position_setpoint" />
+  <arg name="motor_topic" default="/quad/motor_cmd" />
+  <arg name="cmd_topic" default="/quad/position_setpoint" />
+  <arg name="so3_cmd_topic" default="" />
   <!-- Parameters loaded from YAML -->
   <rosparam command="load" file="$(find uam_controller)/config/controller_params.yaml" />
   <rosparam command="load" file="$(find uam_controller)/config/uam_config.yaml" ns="uam_config" />
@@ -7,10 +13,18 @@
   <!-- Dynamic reconfigure server is part of controller node -->
 
   <!-- Controller node -->
-  <node pkg="uam_controller" type="controller_node" name="uam_controller_node" output="screen" />
+  <node pkg="uam_controller" type="controller_node" name="uam_controller_node" output="screen">
+    <param name="odom_topic" value="$(arg odom_topic)" />
+    <param name="setpoint_topic" value="$(arg setpoint_topic)" />
+    <param name="motor_cmd_topic" value="$(arg motor_topic)" />
+  </node>
 
   <!-- Setpoint publisher -->
-  <node pkg="uam_controller" type="setpoint_publisher" name="setpoint_publisher" output="screen" />
+  <group if="$(arg use_setpoint_publisher)">
+    <node pkg="uam_controller" type="setpoint_publisher" name="setpoint_publisher" output="screen">
+      <param name="setpoint_topic" value="$(arg cmd_topic)" />
+    </node>
+  </group>
 
   <!-- Launch dynamic reconfigure UI for interactive gain tuning -->
   <node pkg="rqt_reconfigure" type="rqt_reconfigure" name="uam_rqt_reconfigure" output="screen" />
