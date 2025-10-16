@@ -12,6 +12,16 @@ airsim_bridge/multirotor
 主要接口基本上在 airsim_ros_bridge.py 文件已经调用了
 
 
+运行前
+```
+airsim 桥接
+```
+
+运行后取消 triger 等待
+```
+rostopic pub /triger geometry_msgs/PoseStamped '{header: {frame_id: "map"}, pose: {position: {x: 3.0, y: 1.2, z: 1.0}, orientation: {w: 1.0}}}' -r 1
+```
+
 ## mujoco 和 ekf 的话题冲突
 
 我发现airsim中出现了飞机模型渲染的瞬间移动到人物周围的情况，但是大部分时间还是留在了原地，哪怕d2p模块输出了3d点给tracker模块，tracker模块还是没办法正常工作，我现在怀疑是mujoco和tracker、airsim ros py这三个关于飞机位置姿态相关的话题数据或者覆盖存在连接失败或者冲突
