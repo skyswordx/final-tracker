@@ -1,0 +1,11 @@
+# Mapping between MuJoCo movable objects (after qpos offset) and UE5 / AirSim actors
+# qpos_index is zero-based w.r.t. movable objects (each occupies 7 entries).
+objects:
+  - name: cup
+    airsim_name: cup_actor
+    qpos_index: 0
+    teleport: true
+  - name: small_cube
+    airsim_name: cube_actor
+    qpos_index: 1
+    teleport: true

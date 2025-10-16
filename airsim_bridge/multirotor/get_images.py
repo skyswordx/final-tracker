@@ -5,9 +5,9 @@ import cv2
 import time
 
 def main():
-    # 连接到AirSim模拟器
-    client = airsim.MultirotorClient()
+    client = airsim.MultirotorClient(ip="192.168.1.121")
     client.confirmConnection()
+    # print("Connected to AirSim ")
     client.enableApiControl(True)
     client.armDisarm(True)
 

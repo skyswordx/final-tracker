@@ -49,6 +49,8 @@
 
   <include file="$(find d2p)/launch/d2p.launch">
     <arg name="image_topic" value="$(arg rgb_topic)" />
+    <arg name="depth_topic" value="$(arg depth_topic)" />
+    <arg name="odom_topic" value="$(arg odom_topic)" />
     <arg name="use_rviz" value="false" />
   </include>
 

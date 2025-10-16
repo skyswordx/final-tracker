@@ -1,12 +1,13 @@
 <launch>
     <arg name="image_topic" default="/diy_img/rgb/image_raw"/>
+    <arg name="depth_topic" default="/diy_img/depth/image_raw"/>
+    <arg name="odom_topic" default="/diy_odom"/>
     <arg name="use_rviz" default="true"/>
 
     <!-- 启动 d2p_node -->
     <node name="d2p_node" pkg="d2p" type="d2p_node" output="screen">
-        <!-- 你可以在这里添加任何必要的参数 -->
-        <!-- 例如，如果 d2p_node 需要特定的参数，可以在此添加 -->
-        <!-- <param name="param_name" value="param_value" /> -->
+        <remap from="/iris_0/realsense/depth_camera/depth/image_raw" to="$(arg depth_topic)"/>
+        <remap from="/iris_0/mavros/vision_odom/odom" to="$(arg odom_topic)"/>
     </node>
     <node name="detect_node" pkg="d2p" type="yolo_detector_node.py" output="screen">
         <param name="image_topic" value="$(arg image_topic)"/>

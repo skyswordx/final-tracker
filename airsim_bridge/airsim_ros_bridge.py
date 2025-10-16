@@ -5,31 +5,42 @@
 
 import math
 import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional
+
+import numpy as np
 
 import airsim
 import rospy
 import yaml
 from geometry_msgs.msg import Quaternion
 from nav_msgs.msg import Odometry
-from std_msgs.msg import Float64, Float64MultiArray
+from sensor_msgs.msg import CameraInfo, Image
+from std_msgs.msg import Float64MultiArray
 
 # ---------------- Hard-coded defaults (no CLI args) ----------------
-VEHICLE_NAME = ""                 # '' = default active vehicle in AirSim
+DEFAULT_VEHICLE_NAME = ""         # '' = default active vehicle in AirSim
 IGNORE_COLLISION = True
-JOINT_ANGLES_IN_DEGREES = False   # incoming /quad/joint_angles in radians -> convert to degrees
-AIRSIM_IP = "192.168.1.225"
+AIRSIM_IP = "192.168.1.121"
 AIRSIM_PORT = 41451
-AIRSIM_TIMEOUT = 3600
+AIRSIM_TIMEOUT = 10
+AIRSIM_CONNECT_ATTEMPTS = 5
+AIRSIM_RETRY_DELAY_SEC = 2.0
 RPC_RATE_HZ = 20.0                # AirSim RPC update rate
 OBJECT_CHUNK_SIZE = 7             # MuJoCo free joint → 7 DoF chunk per object
 DEFAULT_QPOS_OFFSET = 0           # 默认消息从额外物体开始
 DEFAULT_OBJECT_TOPIC = "/quad/object_poses"  # Float64MultiArray publishing object chunks
 DEFAULT_OBJECT_MAP = "airsim_object_map.yaml"
-
-FINGER_STATE_TOPIC = "/quad/finger_state"
+DEFAULT_ODOM_TOPIC = "/diy_odom"
+DEFAULT_RGB_TOPIC = "/diy_img/rgb/image_raw"
+DEFAULT_DEPTH_TOPIC = "/diy_img/depth/image_raw"
+DEFAULT_CAMERA_INFO_TOPIC = "/diy_img/camera_info"
+DEFAULT_CAMERA_FRAME_ID = "airsim/camera"
+DEFAULT_CAMERA_NAME = "0"
+CAMERA_RATE_HZ = 10.0
+DEPTH_CLIP_MAX = 100.0
 
 ROTATE_WORLD_Z_DEG = 90.0
 ROTATE_WORLD_Z_RAD = math.radians(ROTATE_WORLD_Z_DEG)
@@ -95,6 +106,17 @@ class AirSimRosBridge:
         # --- ROS init ---
         rospy.init_node("airsim_ros_bridge", anonymous=False)
 
+        # --- ROS parameters ---
+        self.vehicle_name = rospy.get_param("~vehicle_name", DEFAULT_VEHICLE_NAME)
+        self.odom_topic = rospy.get_param("~odom_topic", DEFAULT_ODOM_TOPIC)
+        self.rgb_topic = rospy.get_param("~rgb_topic", DEFAULT_RGB_TOPIC)
+        self.depth_topic = rospy.get_param("~depth_topic", DEFAULT_DEPTH_TOPIC)
+        self.camera_info_topic = rospy.get_param("~camera_info_topic", DEFAULT_CAMERA_INFO_TOPIC)
+        self.camera_name = rospy.get_param("~camera_name", DEFAULT_CAMERA_NAME)
+        self.camera_frame_id = rospy.get_param("~camera_frame_id", DEFAULT_CAMERA_FRAME_ID)
+        self.camera_rate_hz = float(rospy.get_param("~camera_rate_hz", CAMERA_RATE_HZ))
+        self.depth_clip = float(rospy.get_param("~depth_clip_max", DEPTH_CLIP_MAX))
+
         # --- Config for movable objects ---
         map_param = rospy.get_param("~object_map_config", DEFAULT_OBJECT_MAP)
         candidate_path = Path(map_param)
@@ -109,8 +131,7 @@ class AirSimRosBridge:
         self.scene_objects: List[SceneObjectSpec] = self._load_object_mapping(self.object_map_path)
 
         # --- AirSim client (single instance, thread-unsafe -> we serialize calls) ---
-        self.client = airsim.MultirotorClient(ip=AIRSIM_IP, port=AIRSIM_PORT, timeout_value=AIRSIM_TIMEOUT)
-        self.client.confirmConnection()
+        self.client = self._connect_to_airsim()
         self.client.enableApiControl(True)
         print("Connected to AirSim.")
         print("Client Ver:1 (Min Req: 1), Server Ver:%s (Min Req: %s)" %
@@ -123,25 +144,28 @@ class AirSimRosBridge:
                 0.1,                        # duration (s)
                 airsim.DrivetrainType.MaxDegreeOfFreedom,
                 airsim.YawMode(False, 0.0),
-                VEHICLE_NAME
+                self.vehicle_name
             ).join()
         except Exception as ex:
             rospy.logwarn("[AirSimBridge] initial moveByVelocityAsync(0,0,0) failed: %s", ex)
 
         # Latest data caches
         self._latest_odom: Optional[Odometry] = None
-        self._latest_joint: Optional[Float64MultiArray] = None
         self._latest_object_data: Optional[List[float]] = None
         self._object_remainder_warned = False
-        self._finger_value: Optional[float] = None
+        self._camera_info_msg: Optional[CameraInfo] = None
 
         # Locks
         self._state_lock = threading.Lock()  # protect latest data
         self._rpc_lock = threading.Lock()    # serialize RPC
 
+        # Publishers
+        self.rgb_pub = rospy.Publisher(self.rgb_topic, Image, queue_size=1)
+        self.depth_pub = rospy.Publisher(self.depth_topic, Image, queue_size=1)
+        self.camera_info_pub = rospy.Publisher(self.camera_info_topic, CameraInfo, queue_size=1)
+
         # Subscribers (callbacks only stash data, no RPC here)
-        self.odom_sub  = rospy.Subscriber("/quad/odometry", Odometry, self._cb_odom,   queue_size=20)
-        self.joint_sub = rospy.Subscriber("/quad/joint_angles", Float64MultiArray, self._cb_joint, queue_size=20)
+        self.odom_sub = rospy.Subscriber(self.odom_topic, Odometry, self._cb_odom, queue_size=20)
         self.object_sub = None
         if self.scene_objects and self.object_state_topic:
             self.object_sub = rospy.Subscriber(
@@ -153,13 +177,6 @@ class AirSimRosBridge:
         elif self.scene_objects:
             rospy.logwarn("[AirSimBridge] Scene objects configured but ~object_state_topic is empty.")
 
-        self.finger_sub = rospy.Subscriber(
-            FINGER_STATE_TOPIC,
-            Float64,
-            self._cb_finger,
-            queue_size=1
-        )
-
         if self.scene_objects:
             names = ", ".join(f"{spec.name}->{spec.airsim_name}" for spec in self.scene_objects)
             rospy.loginfo("[AirSimBridge] Loaded %d object mappings: %s", len(self.scene_objects), names)
@@ -167,9 +184,16 @@ class AirSimRosBridge:
             rospy.loginfo("[AirSimBridge] No movable object mappings loaded.")
 
         # Timer loop to perform RPC
-        self.timer = rospy.Timer(rospy.Duration(1.0 / RPC_RATE_HZ), self._rpc_tick, oneshot=False)
+        self.rpc_timer = rospy.Timer(rospy.Duration(1.0 / RPC_RATE_HZ), self._rpc_tick, oneshot=False)
+        self.camera_timer = None
+        if self.camera_rate_hz > 0.0:
+            self.camera_timer = rospy.Timer(
+                rospy.Duration(max(1.0 / self.camera_rate_hz, 1e-3)),
+                self._camera_tick,
+                oneshot=False,
+            )
         rospy.loginfo("[AirSimBridge] Ready. vehicle='%s', ignore_collision=%s, rate=%.1f Hz",
-                      VEHICLE_NAME, str(IGNORE_COLLISION), RPC_RATE_HZ)
+                      self.vehicle_name, str(IGNORE_COLLISION), RPC_RATE_HZ)
 
     # ---------------- Config helpers ----------------
     def _load_object_mapping(self, config_path: Path) -> List[SceneObjectSpec]:
@@ -201,14 +225,33 @@ class AirSimRosBridge:
                 rospy.logwarn("[AirSimBridge] Invalid object config entry %s: %s", entry, ex)
         return specs
 
+    def _connect_to_airsim(self) -> airsim.MultirotorClient:
+        last_error: Optional[Exception] = None
+        for attempt in range(1, AIRSIM_CONNECT_ATTEMPTS + 1):
+            client = airsim.MultirotorClient(
+                ip=AIRSIM_IP,
+                port=AIRSIM_PORT,
+                timeout_value=AIRSIM_TIMEOUT,
+            )
+            try:
+                client.confirmConnection()
+                rospy.loginfo("[AirSimBridge] Connected to AirSim at %s:%s on attempt %d",
+                              AIRSIM_IP, AIRSIM_PORT, attempt)
+                return client
+            except Exception as ex:
+                last_error = ex
+                rospy.logwarn("[AirSimBridge] Failed to connect to AirSim (attempt %d/%d): %s",
+                              attempt, AIRSIM_CONNECT_ATTEMPTS, ex)
+                if attempt < AIRSIM_CONNECT_ATTEMPTS:
+                    time.sleep(AIRSIM_RETRY_DELAY_SEC)
+        rospy.logfatal("[AirSimBridge] Unable to connect to AirSim at %s:%s after %d attempts.",
+                       AIRSIM_IP, AIRSIM_PORT, AIRSIM_CONNECT_ATTEMPTS)
+        raise RuntimeError(f"Unable to connect to AirSim at {AIRSIM_IP}:{AIRSIM_PORT}") from last_error
+
     # ---------------- Callbacks: only cache data ----------------
     def _cb_odom(self, msg: Odometry):
         with self._state_lock:
             self._latest_odom = msg
-
-    def _cb_joint(self, msg: Float64MultiArray):
-        with self._state_lock:
-            self._latest_joint = msg
 
     def _cb_object_state(self, msg: Float64MultiArray):
         if not msg.data:
@@ -216,21 +259,12 @@ class AirSimRosBridge:
         with self._state_lock:
             self._latest_object_data = list(msg.data)
 
-    def _cb_finger(self, msg: Float64):
-        value = float(msg.data)
-        if not math.isfinite(value):
-            return
-        with self._state_lock:
-            self._finger_value = value
-
     # ---------------- Timer: safe serialized RPC calls ----------------
     def _rpc_tick(self, _evt):
         # Snapshot latest data
         with self._state_lock:
             odom = self._latest_odom
-            joint = self._latest_joint
             object_data = list(self._latest_object_data) if self._latest_object_data is not None else None
-            finger_value = self._finger_value
 
         # 1) Pose update to AirSim
         if odom is not None:
@@ -251,48 +285,157 @@ class AirSimRosBridge:
 
                 pose = airsim.Pose(airsim_pos, airsim_quat)
                 with self._rpc_lock:
-                    self.client.simSetVehiclePose(pose, IGNORE_COLLISION, VEHICLE_NAME)
+                    self.client.simSetVehiclePose(pose, IGNORE_COLLISION, self.vehicle_name)
             except Exception as ex:
                 rospy.logwarn_throttle(2.0, "[AirSimBridge] simSetVehiclePose failed: %s", ex)
-
-        # 2) Special value (axis1, axis2) from /quad/joint_angles
-        if joint is not None and len(joint.data) >= 2:
-            v1 = float(joint.data[0])
-            v2 = float(joint.data[1])
-
-            # Convert radians -> degrees if needed
-            if not JOINT_ANGLES_IN_DEGREES:
-                v1 = -math.degrees(v1) - 90
-                v2 = -math.degrees(v2) - 180
-
-                # wrap angles into [-180, 180]
-                v1 = (v1 + 180) % 360 - 180
-                v2 = (v2 + 180) % 360 - 180
-
-            try:
-                with self._rpc_lock:
-                    # axis 1 -> index 1, axis 2 -> index 2
-                    self.client.simSetSpecialValue(v1, 1, VEHICLE_NAME)
-                    self.client.simSetSpecialValue(v2, 2, VEHICLE_NAME)
-            except AttributeError:
-                rospy.logerr_throttle(5.0, "[AirSimBridge] simSetSpecialValue not found on VehicleClient. "
-                                           "Ensure your modified AirSim Python client is installed.")
-            except Exception as ex:
-                rospy.logwarn_throttle(2.0, "[AirSimBridge] simSetSpecialValue failed: %s", ex)
-
-        # 3) Finger state → AirSim special value 3
-        if finger_value is not None:
-            try:
-                with self._rpc_lock:
-                    self.client.simSetSpecialValue(finger_value, 3, VEHICLE_NAME)
-            except AttributeError:
-                rospy.logerr_throttle(5.0, "[AirSimBridge] simSetSpecialValue not found on VehicleClient. Ensure your modified AirSim Python client is installed.")
-            except Exception as ex:
-                rospy.logwarn_throttle(2.0, "[AirSimBridge] simSetSpecialValue (channel 3) failed: %s", ex)
-
-        # 4) Update movable scene objects in UE
+        # 2) Update movable scene objects in UE
         if self.scene_objects and object_data is not None:
             self._sync_scene_objects(object_data)
+
+    def _camera_tick(self, _evt):
+        if (self.rgb_pub.get_num_connections() == 0 and
+                self.depth_pub.get_num_connections() == 0 and
+                self.camera_info_pub.get_num_connections() == 0):
+            return
+
+        try:
+            with self._rpc_lock:
+                responses = self.client.simGetImages(
+                    [
+                        airsim.ImageRequest(
+                            self.camera_name,
+                            airsim.ImageType.Scene,
+                            pixels_as_float=False,
+                            compress=False,
+                        ),
+                        airsim.ImageRequest(
+                            self.camera_name,
+                            airsim.ImageType.DepthPerspective,
+                            pixels_as_float=True,
+                            compress=False,
+                        ),
+                    ],
+                    vehicle_name=self.vehicle_name,
+                )
+        except Exception as ex:
+            rospy.logwarn_throttle(5.0, "[AirSimBridge] simGetImages failed: %s", ex)
+            return
+
+        if not responses or len(responses) < 2:
+            rospy.logwarn_throttle(5.0,
+                                   "[AirSimBridge] simGetImages returned insufficient responses (%d)",
+                                   len(responses) if responses else 0)
+            return
+
+        stamp = rospy.Time.now()
+        scene_response, depth_response = responses[0], responses[1]
+        info_width = 0
+        info_height = 0
+
+        if scene_response.width > 0 and scene_response.height > 0 and scene_response.image_data_uint8:
+            try:
+                rgb = np.frombuffer(scene_response.image_data_uint8, dtype=np.uint8)
+                rgb = rgb.reshape((scene_response.height, scene_response.width, 3))
+            except ValueError as ex:
+                rospy.logwarn_throttle(5.0, "[AirSimBridge] reshape RGB image failed: %s", ex)
+            else:
+                info_width = scene_response.width
+                info_height = scene_response.height
+                rgb_msg = Image()
+                rgb_msg.header.stamp = stamp
+                rgb_msg.header.frame_id = self.camera_frame_id
+                rgb_msg.height = scene_response.height
+                rgb_msg.width = scene_response.width
+                rgb_msg.encoding = "rgb8"
+                rgb_msg.is_bigendian = False
+                rgb_msg.step = scene_response.width * 3
+                rgb_msg.data = rgb.tobytes()
+                self.rgb_pub.publish(rgb_msg)
+
+        if depth_response.width > 0 and depth_response.height > 0 and depth_response.image_data_float:
+            depth_array = np.array(depth_response.image_data_float, dtype=np.float32)
+            expected_size = depth_response.width * depth_response.height
+            if depth_array.size != expected_size:
+                rospy.logwarn_throttle(5.0,
+                                       "[AirSimBridge] Depth buffer size mismatch: expected %d, got %d",
+                                       expected_size,
+                                       depth_array.size)
+            else:
+                if info_width == 0:
+                    info_width = depth_response.width
+                    info_height = depth_response.height
+                depth_array = depth_array.reshape((depth_response.height, depth_response.width))
+                depth_array = np.nan_to_num(depth_array, nan=self.depth_clip, posinf=self.depth_clip, neginf=0.0)
+                if self.depth_clip > 0:
+                    np.clip(depth_array, 0.0, self.depth_clip, out=depth_array)
+                depth_msg = Image()
+                depth_msg.header.stamp = stamp
+                depth_msg.header.frame_id = self.camera_frame_id
+                depth_msg.height = depth_response.height
+                depth_msg.width = depth_response.width
+                depth_msg.encoding = "32FC1"
+                depth_msg.is_bigendian = False
+                depth_msg.step = depth_response.width * 4
+                depth_msg.data = depth_array.tobytes()
+                self.depth_pub.publish(depth_msg)
+
+        if self.camera_info_pub.get_num_connections() > 0 and info_width > 0 and info_height > 0:
+            self._ensure_camera_info(info_width, info_height, stamp)
+
+    def _ensure_camera_info(self, width: int, height: int, stamp: rospy.Time):
+        if width <= 0 or height <= 0:
+            return
+
+        need_refresh = (
+            self._camera_info_msg is None
+            or self._camera_info_msg.width != width
+            or self._camera_info_msg.height != height
+        )
+
+        if need_refresh:
+            try:
+                with self._rpc_lock:
+                    cam_info = self.client.simGetCameraInfo(self.camera_name, self.vehicle_name)
+            except Exception as ex:
+                rospy.logwarn_throttle(10.0, "[AirSimBridge] simGetCameraInfo failed: %s", ex)
+                return
+
+            msg = CameraInfo()
+            msg.width = width
+            msg.height = height
+            fov = cam_info.fov if cam_info.fov > 0 else 90.0
+            fov_rad = math.radians(fov)
+            try:
+                fx = (width / 2.0) / math.tan(fov_rad / 2.0)
+            except ZeroDivisionError:
+                fx = width
+            fy = fx
+            cx = width / 2.0
+            cy = height / 2.0
+
+            msg.K = [fx, 0.0, cx,
+                     0.0, fy, cy,
+                     0.0, 0.0, 1.0]
+
+            msg.P = [fx, 0.0, cx, 0.0,
+                     0.0, fy, cy, 0.0,
+                     0.0, 0.0, 1.0, 0.0]
+
+            msg.R = [1.0, 0.0, 0.0,
+                     0.0, 1.0, 0.0,
+                     0.0, 0.0, 1.0]
+
+            msg.distortion_model = "plumb_bob"
+            msg.D = [0.0, 0.0, 0.0, 0.0, 0.0]
+
+            self._camera_info_msg = msg
+
+        info = self._camera_info_msg
+        if info is None:
+            return
+        info.header.stamp = stamp
+        info.header.frame_id = self.camera_frame_id
+        self.camera_info_pub.publish(info)
 
     def _sync_scene_objects(self, object_chunks: List[float]):
         usable = len(object_chunks) - self.object_qpos_offset
